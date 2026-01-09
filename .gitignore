@@ -1,0 +1,18 @@
+# Python virtual environment
+env/
+inter_venv/
+.venv/
+
+# Node
+node_modules/
+
+# Environment variables
+.env
+
+# Cache
+__pycache__/
+*.pyc
+
+# Build
+dist/
+build/
