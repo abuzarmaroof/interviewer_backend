@@ -146,18 +146,6 @@ def stop_camera():
     return {"status": "camera stopped"}
 
 
-# @app.post("/chat")
-# async def chat(request: Request):
-#     data = await request.json() if request.headers.get("content-length") != "0" else {}
-
-#     if not data or "message" not in data:
-#         return bot.start_interview()
-
-#     user_message = data["message"]
-#     response = bot.ask_question(user_message)
-
-#     return response
-
 @app.post("/chat")
 async def chat(request: Request):
     try:
