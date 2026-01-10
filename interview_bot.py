@@ -445,28 +445,74 @@ Based on the candidate’s previous answer:
     def generate_report(self):
         time_taken = round(time.time() - self.start_time, 2)
 
+        # ---------- HARD FACTS (CANNOT BE FAKED) ----------
+        user_answers = [
+            msg["content"]
+            for msg in self.history
+            if msg["role"] == "user" and msg["content"].strip()
+        ]
+
+        answer_count = len(user_answers)
+
+        # 🚨 CASE 1: NO ANSWERS AT ALL
+        if answer_count == 0:
+            return {
+                "role": "assistant",
+                "ended": True,
+                "time_taken_seconds": time_taken,
+                "report": {
+                    "summary": "The candidate did not provide any answers. The interview could not be evaluated.",
+                    "strengths": [],
+                    "weaknesses": ["No responses were provided"],
+                    "strong_skills": [],
+                    "moderate_skills": [],
+                    "weak_skills": ["Unable to assess any technical skill"],
+                    "recommendation": "The candidate should retake the interview and actively answer the questions.",
+                    "overall_rating": 5,
+                    "scores": {
+                        "overall": 5,
+                        "completeness": 0,
+                        "communication": 0,
+                        "technical": 0,
+                        "confidence": 0
+                    }
+                }
+            }
+
+        # 🚨 CASE 2: VERY SHORT / VERY QUICK INTERVIEW
+        if answer_count < 3 or time_taken < 30:
+            forced_cap = 25
+        else:
+            forced_cap = 100
+
+        # ---------- STRICT PROMPT FOR LLM ----------
         report_prompt = f"""
-    You are a STRICT and HONEST technical interviewer.
+    You are a STRICT, EVIDENCE-BASED technical interviewer.
 
     Skill Interviewed: {self.skill}
 
-    Conversation History:
-    {self.history}
+    ONLY evaluate based on the candidate's answers below:
+    {user_answers}
 
-    Behavior Metrics:
-    {self.behavior_log}
+    Rules you MUST follow:
+    - Judge ONLY from the answers above
+    - If answers are vague, short, or incomplete → give LOW scores
+    - Do NOT guess skills
+    - Do NOT invent achievements
+    - If something was not demonstrated, mark it as weak
+    - Be critical and realistic
 
-    You MUST return ONLY valid JSON in EXACTLY this format:
+    Return ONLY valid JSON in EXACTLY this format:
 
     {{
     "summary": "string",
-    "strengths": ["string", "string"],
-    "weaknesses": ["string", "string"],
-    "strong_skills": ["string", "string"],
-    "moderate_skills": ["string", "string"],
-    "weak_skills": ["string", "string"],
+    "strengths": ["string"],
+    "weaknesses": ["string"],
+    "strong_skills": ["string"],
+    "moderate_skills": ["string"],
+    "weak_skills": ["string"],
     "recommendation": "string",
-    "overall_rating": number, 
+    "overall_rating": number,
     "scores": {{
         "overall": number,
         "completeness": number,
@@ -476,11 +522,9 @@ Based on the candidate’s previous answer:
     }}
     }}
 
-    Rules:
-    - overall_rating and all scores MUST be numbers from 0 to 100
-    - Do not invent skills not discussed
-    - Judge ONLY from the conversation
-    - Be honest and realistic
+    Important:
+    - Scores MUST reflect answer quality
+    - If answers are limited, scores MUST be low
     - Do NOT return anything outside JSON
     """
 
@@ -489,33 +533,43 @@ Based on the candidate’s previous answer:
             messages=[
                 {"role": "system", "content": report_prompt}
             ],
-            temperature=0.3,
+            temperature=0.2,
         )
 
         raw = completion.choices[0].message.content.strip()
 
         try:
             report = json.loads(raw)
+
+            # ---------- HARD SCORE CAP (ANTI-CHEAT) ----------
+            report["overall_rating"] = min(int(report.get("overall_rating", 0)), forced_cap)
+
+            scores = report.get("scores", {})
+            for k in ["overall", "completeness", "communication", "technical", "confidence"]:
+                scores[k] = min(int(scores.get(k, 0)), forced_cap)
+
+            report["scores"] = scores
+
         except Exception as e:
             print("❌ Report JSON parse failed:", e)
             print("RAW OUTPUT:", raw)
 
-            # Safe fallback so UI never breaks
+            # ---------- SAFE FALLBACK ----------
             report = {
-                "summary": "Report could not be generated properly.",
+                "summary": "The interview could not be evaluated properly due to an internal error.",
                 "strengths": [],
-                "weaknesses": [],
+                "weaknesses": ["Insufficient reliable evaluation data"],
                 "strong_skills": [],
                 "moderate_skills": [],
-                "weak_skills": [],
-                "recommendation": "Needs improvement",
-                "overall_rating": 50,
+                "weak_skills": ["Unable to assess skills accurately"],
+                "recommendation": "Please retake the interview.",
+                "overall_rating": 20,
                 "scores": {
-                    "overall": 50,
-                    "completeness": 50,
-                    "communication": 50,
-                    "technical": 50,
-                    "confidence": 50
+                    "overall": 20,
+                    "completeness": 20,
+                    "communication": 20,
+                    "technical": 20,
+                    "confidence": 20
                 }
             }
 
@@ -525,6 +579,7 @@ Based on the candidate’s previous answer:
             "time_taken_seconds": time_taken,
             "report": report
         }
+
 
 #     def generate_report(self):
 #         time_taken = round(time.time() - self.start_time, 2)

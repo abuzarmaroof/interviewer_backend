@@ -97,18 +97,24 @@ from fastapi.responses import StreamingResponse
 from interview_bot import InterviewBot
 from vision_analyzer import VisionAnalyzer
 import threading
-from fastapi import UploadFile, File, Form
 import pdfplumber
 import io
+from fastapi import UploadFile, File, Form
+import docx
 
 app = FastAPI()
 
+origins = [
+    "http://localhost:5173",  # React (Vite)
+    "http://127.0.0.1:5173",
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=origins,      # or ["*"] for all (not recommended for prod)
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["*"],        # GET, POST, PUT, DELETE, etc
+    allow_headers=["*"],        # All headers
 )
 
 bot = InterviewBot()
@@ -121,6 +127,35 @@ def extract_text_from_pdf_bytes(file_bytes: bytes):
             if t:
                 text += t + "\n"
     return text.strip()
+
+
+def extract_text_from_file(file: UploadFile):
+    filename = file.filename.lower()
+
+    content = file.file.read()
+
+    # PDF
+    if filename.endswith(".pdf"):
+        return extract_text_from_pdf_bytes(content)
+
+    # TXT
+    elif filename.endswith(".txt"):
+        try:
+            return content.decode("utf-8", errors="ignore")
+        except:
+            return ""
+
+    # DOCX
+    elif filename.endswith(".docx"):
+        try:
+            doc = docx.Document(io.BytesIO(content))
+            return "\n".join(p.text for p in doc.paragraphs)
+        except:
+            return ""
+
+    else:
+        return ""
+
 
 
 # ✅ START CAMERA
@@ -145,61 +180,70 @@ def stop_camera():
     vision.stop()
     return {"status": "camera stopped"}
 
+@app.post("/start_interview")
+async def start_interview(
+    name: str = Form(...),
+    topic: str = Form(""),
+    difficulty: str = Form("Intermediate"),
+    mode: str = Form("Conceptual"),
+    resume: UploadFile = File(None),
+    notes: UploadFile = File(None),
+):
+    resume_text = ""
+    notes_text = ""
+
+    if resume:
+        resume_text = extract_text_from_file(resume)
+        print("✅ Resume text length:", len(resume_text))
+
+    if notes:
+        notes_text = extract_text_from_file(notes)
+        print("✅ Notes text length:", len(notes_text))
+
+    setup = {
+        "name": name,
+        "topic": topic,
+        "difficulty": difficulty,
+        "mode": mode,
+        "resume_text": resume_text,
+        "notes_text": notes_text,
+    }
+
+    return bot.start_interview(setup)
+
+# @app.post("/chat")
+# async def chat(request: Request):
+#     data = await request.json()
+#     if "message" not in data:
+#         return {"role": "assistant", "message": "Invalid request"}
+#     return bot.ask_question(data["message"])
 
 @app.post("/chat")
 async def chat(request: Request):
-    try:
-        data = await request.json()
-    except:
-        data = {}
-
-    if "setup" in data:
-        return bot.start_interview(data["setup"])
+    data = await request.json()
 
     if "message" not in data:
-        return {"role": "assistant", "message": "Invalid request"}
+        return {"ended": False, "message": "Invalid request"}
 
-    return bot.ask_question(data["message"])
+    result = bot.ask_question(data["message"])
 
+    # If bot returned full report (ended = True)
+    if isinstance(result, dict) and result.get("ended") is True:
+        return result
 
+    # Normal message
+    if isinstance(result, dict) and "message" in result:
+        return {
+            "ended": False,
+            "message": result["message"]
+        }
 
-# @app.post("/chat")
-# async def chat(
-#     request: Request,
-#     resume: UploadFile = File(None),
-#     notes: UploadFile = File(None),
-#     setup: str = Form(None),
-# ):
-#     # If multipart/form-data with file
-#     if setup:
-#         import json
-#         setup_data = json.loads(setup)
+    # Fallback safety
+    return {
+        "ended": False,
+        "message": str(result)
+    }
 
-#         # If resume uploaded
-#         if resume:
-#             file_bytes = await resume.read()
-#             text = extract_text_from_pdf_bytes(file_bytes)
-#             setup_data["resume_text"] = text
-
-#         # If notes uploaded
-#         if notes:
-#             file_bytes = await notes.read()
-#             text = extract_text_from_pdf_bytes(file_bytes)
-#             setup_data["notes_text"] = text
-
-#         return bot.start_interview(setup_data)
-
-#     # Else: normal JSON chat message
-#     data = await request.json() if request.headers.get("content-length") != "0" else {}
-
-#     if not data or "message" not in data:
-#         return {
-#             "role": "assistant",
-#             "message": "⚠️ Invalid request."
-#         }
-
-#     user_message = data["message"]
-#     return bot.ask_question(user_message)
 
 
 # ✅ METRICS ENDPOINT
