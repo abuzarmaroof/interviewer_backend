@@ -1,4 +1,10 @@
 fastapi
 uvicorn
+python-multipart
+opencv-python
+mediapipe
+numpy
+pydantic
 python-dotenv
 groq
+pdfplumber
