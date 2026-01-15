@@ -8,5 +8,5 @@ pydantic
 python-dotenv
 groq
 pdfplumber
-mediapipe==0.10.9
-opencv-python
+# mediapipe==0.10.9
+# opencv-python

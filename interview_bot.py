@@ -442,35 +442,34 @@ Based on the candidate’s previous answer:
         }
 
     # ---------- GENERATE REPORT ----------
+        # ---------- GENERATE REPORT (PRACTICE / TRAINING MODE) ----------
     def generate_report(self):
         time_taken = round(time.time() - self.start_time, 2)
 
-        # ---------- HARD FACTS (CANNOT BE FAKED) ----------
+        # Collect user answers
         user_answers = [
             msg["content"]
             for msg in self.history
             if msg["role"] == "user" and msg["content"].strip()
         ]
 
-        answer_count = len(user_answers)
-
-        # 🚨 CASE 1: NO ANSWERS AT ALL
-        if answer_count == 0:
+        # If user really did nothing
+        if len(user_answers) == 0:
             return {
                 "role": "assistant",
                 "ended": True,
                 "time_taken_seconds": time_taken,
                 "report": {
-                    "summary": "The candidate did not provide any answers. The interview could not be evaluated.",
+                    "summary": "You did not answer any questions, so the interview could not be evaluated.",
                     "strengths": [],
-                    "weaknesses": ["No responses were provided"],
+                    "weaknesses": ["No answers were provided"],
                     "strong_skills": [],
                     "moderate_skills": [],
-                    "weak_skills": ["Unable to assess any technical skill"],
-                    "recommendation": "The candidate should retake the interview and actively answer the questions.",
-                    "overall_rating": 5,
+                    "weak_skills": ["Communication", "Concept clarity"],
+                    "recommendation": "Try again and attempt the questions. This system is for practice and improvement.",
+                    "overall_rating": 10,
                     "scores": {
-                        "overall": 5,
+                        "overall": 10,
                         "completeness": 0,
                         "communication": 0,
                         "technical": 0,
@@ -479,99 +478,92 @@ Based on the candidate’s previous answer:
                 }
             }
 
-        # 🚨 CASE 2: VERY SHORT / VERY QUICK INTERVIEW
-        if answer_count < 3 or time_taken < 30:
-            forced_cap = 25
-        else:
-            forced_cap = 100
-
-        # ---------- STRICT PROMPT FOR LLM ----------
+        # ---------- USE LLM AS THE REAL EVALUATOR ----------
         report_prompt = f"""
-    You are a STRICT, EVIDENCE-BASED technical interviewer.
+You are a friendly but honest technical mentor.
 
-    Skill Interviewed: {self.skill}
+This is a PRACTICE interview, not a hiring decision.
 
-    ONLY evaluate based on the candidate's answers below:
-    {user_answers}
+Your job:
+- Analyze the candidate's answers
+- Find strengths and weaknesses
+- Guide the candidate how to improve
+- Be constructive, honest, and practical
+- If answers are weak, clearly say so
+- If answers are okay, encourage and suggest improvements
+- If answers are good, still suggest how to become better
 
-    Rules you MUST follow:
-    - Judge ONLY from the answers above
-    - If answers are vague, short, or incomplete → give LOW scores
-    - Do NOT guess skills
-    - Do NOT invent achievements
-    - If something was not demonstrated, mark it as weak
-    - Be critical and realistic
+Candidate answers:
+{user_answers}
 
-    Return ONLY valid JSON in EXACTLY this format:
+Return ONLY valid JSON in this format:
 
-    {{
-    "summary": "string",
-    "strengths": ["string"],
-    "weaknesses": ["string"],
-    "strong_skills": ["string"],
-    "moderate_skills": ["string"],
-    "weak_skills": ["string"],
-    "recommendation": "string",
-    "overall_rating": number,
-    "scores": {{
-        "overall": number,
-        "completeness": number,
-        "communication": number,
-        "technical": number,
-        "confidence": number
-    }}
-    }}
+{{
+"summary": "string",
+"strengths": ["string"],
+"weaknesses": ["string"],
+"strong_skills": ["string"],
+"moderate_skills": ["string"],
+"weak_skills": ["string"],
+"recommendation": "string",
+"overall_rating": number,   // 0–100 realistic practice score
+"scores": {{
+    "overall": number,
+    "completeness": number,
+    "communication": number,
+    "technical": number,
+    "confidence": number
+}}
+}}
 
-    Important:
-    - Scores MUST reflect answer quality
-    - If answers are limited, scores MUST be low
-    - Do NOT return anything outside JSON
-    """
+Rules:
+- Be realistic and consistent
+- If answers are weak, scores should be low (30–50)
+- If answers are average, scores should be medium (50–70)
+- If answers are good, scores can be higher (70–85)
+- Rarely give above 90
+- Scores and text MUST agree with each other
+"""
 
         completion = client.chat.completions.create(
             model="llama-3.1-8b-instant",
-            messages=[
-                {"role": "system", "content": report_prompt}
-            ],
-            temperature=0.2,
+            messages=[{"role": "system", "content": report_prompt}],
+            temperature=0.3,
         )
 
         raw = completion.choices[0].message.content.strip()
 
         try:
             report = json.loads(raw)
-
-            # ---------- HARD SCORE CAP (ANTI-CHEAT) ----------
-            report["overall_rating"] = min(int(report.get("overall_rating", 0)), forced_cap)
-
-            scores = report.get("scores", {})
-            for k in ["overall", "completeness", "communication", "technical", "confidence"]:
-                scores[k] = min(int(scores.get(k, 0)), forced_cap)
-
-            report["scores"] = scores
-
-        except Exception as e:
-            print("❌ Report JSON parse failed:", e)
-            print("RAW OUTPUT:", raw)
-
-            # ---------- SAFE FALLBACK ----------
+        except:
             report = {
-                "summary": "The interview could not be evaluated properly due to an internal error.",
+                "summary": "Your answers were recorded, but the system could not generate a proper evaluation.",
                 "strengths": [],
-                "weaknesses": ["Insufficient reliable evaluation data"],
+                "weaknesses": ["Could not analyze answers properly"],
                 "strong_skills": [],
                 "moderate_skills": [],
-                "weak_skills": ["Unable to assess skills accurately"],
-                "recommendation": "Please retake the interview.",
-                "overall_rating": 20,
+                "weak_skills": ["General understanding"],
+                "recommendation": "Please try again and give clearer answers.",
+                "overall_rating": 40,
                 "scores": {
-                    "overall": 20,
-                    "completeness": 20,
-                    "communication": 20,
-                    "technical": 20,
-                    "confidence": 20
+                    "overall": 40,
+                    "completeness": 40,
+                    "communication": 40,
+                    "technical": 40,
+                    "confidence": 40
                 }
             }
+
+        # ---------- SOFT ADJUST CONFIDENCE USING VISION ----------
+        if self.behavior_log:
+            avg_conf = sum(b.get("confidence", 50) for b in self.behavior_log) / len(self.behavior_log)
+            avg_stress = sum(b.get("stress", 50) for b in self.behavior_log) / len(self.behavior_log)
+            vision_conf = int(avg_conf * 0.7 + (100 - avg_stress) * 0.3)
+
+            # Blend with LLM confidence
+            report["scores"]["confidence"] = int(
+                (report["scores"].get("confidence", 50) * 0.7) + (vision_conf * 0.3)
+            )
 
         return {
             "role": "assistant",
@@ -579,7 +571,6 @@ Based on the candidate’s previous answer:
             "time_taken_seconds": time_taken,
             "report": report
         }
-
 
 #     def generate_report(self):
 #         time_taken = round(time.time() - self.start_time, 2)
