@@ -1,12 +1,13 @@
 fastapi
 uvicorn
 python-multipart
-mediapipe==0.10.31
+# mediapipe==0.10.31
 # opencv-python
 numpy
 pydantic
 python-dotenv
 groq
 pdfplumber
-# mediapipe==0.10.9
+mediapipe==0.10.9
 opencv-python-headless
+python-3.10.11
