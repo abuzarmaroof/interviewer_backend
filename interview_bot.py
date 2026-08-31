@@ -127,7 +127,7 @@
 #         self.history.append({"role": "user", "content": user_message})
 
 #         completion = client.chat.completions.create(
-#             model="llama-3.1-8b-instant",
+#             model="openai/gpt-oss-120b",
 #             messages=[
 #                 {"role": "system", "content": SYSTEM_PROMPT},
 #                 {"role": "system", "content": prompt},
